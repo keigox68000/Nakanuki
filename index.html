@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>中抜き画像結合ツール（Slice & Stitch）</title>
+  <style>
+    :root {
+      --bg-color: #181a1f;
+      --panel-color: #21252b;
+      --text-color: #e6e6e6;
+      --accent-color: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger-color: rgba(239, 68, 68, 0.45);
+      --line-color: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      background-color: var(--panel-color);
+      padding: 12px 20px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    button, .file-label {
+      background-color: #333842;
+      color: #fff;
+      border: 1px solid #444;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: background-color 0.15s;
+      user-select: none;
+    }
+
+    button:hover, .file-label:hover {
+      background-color: #3e4451;
+    }
+
+    button.primary {
+      background-color: var(--accent-color);
+      border-color: var(--accent-color);
+      font-weight: 600;
+    }
+
+    button.primary:hover {
+      background-color: var(--accent-hover);
+    }
+
+    button.active-mode {
+      background-color: #10b981;
+      border-color: #10b981;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding: 20px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .drop-zone {
+      width: 100%;
+      max-width: 700px;
+      height: 360px;
+      border: 2px dashed #555;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #aaa;
+      gap: 12px;
+      margin-top: 40px;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+
+    .drop-zone.dragover {
+      border-color: var(--accent-color);
+      background-color: rgba(59, 130, 246, 0.1);
+      color: #fff;
+    }
+
+    .workspace {
+      display: none;
+      flex-wrap: wrap;
+      gap: 24px;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .panel {
+      background-color: var(--panel-color);
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 100%;
+    }
+
+    .panel-title {
+      font-size: 0.85rem;
+      color: #aaa;
+      margin-bottom: 10px;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .editor-container {
+      position: relative;
+      display: inline-block;
+      user-select: none;
+      line-height: 0;
+    }
+
+    #sourceImg {
+      max-width: 100%;
+      max-height: 75vh;
+      display: block;
+      pointer-events: none;
+    }
+
+    /* 削除エリアのオーバーレイ */
+    .cut-overlay {
+      position: absolute;
+      background-color: var(--danger-color);
+      pointer-events: none;
+    }
+
+    /* ドラッグ可能な境界線 */
+    .cut-line {
+      position: absolute;
+      background-color: var(--line-color);
+      z-index: 10;
+    }
+
+    /* 掴みやすいように透明なヒットエリアを広げる */
+    .cut-line::after {
+      content: "";
+      position: absolute;
+    }
+
+    /* 横カット（上下結合）時のライン */
+    .mode-horizontal .cut-line {
+      left: 0;
+      width: 100%;
+      height: 3px;
+      cursor: ns-resize;
+    }
+    .mode-horizontal .cut-line::after {
+      left: 0;
+      right: 0;
+      top: -8px;
+      bottom: -8px;
+    }
+
+    /* 縦カット（左右結合）時のライン */
+    .mode-vertical .cut-line {
+      top: 0;
+      height: 100%;
+      width: 3px;
+      cursor: ew-resize;
+    }
+    .mode-vertical .cut-line::after {
+      top: 0;
+      bottom: 0;
+      left: -8px;
+      right: -8px;
+    }
+
+    #resultCanvas {
+      max-width: 100%;
+      max-height: 75vh;
+      border: 1px solid #444;
+      background-image: linear-gradient(45deg, #2a2e37 25%, transparent 25%),
+                        linear-gradient(-45deg, #2a2e37 25%, transparent 25%),
+                        linear-gradient(45deg, transparent 75%, #2a2e37 75%),
+                        linear-gradient(-45deg, transparent 75%, #2a2e37 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background-color: #10b981;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>中抜き画像結合ツール</h1>
+    <div class="controls">
+      <label class="file-label">
+        📁 画像を選択
+        <input type="file" id="fileInput" accept="image/*">
+      </label>
+      <button id="btnHorizontal" class="active-mode" title="中央を横に切り抜いて上下をくっつける">上下を結合（横カット）</button>
+      <button id="btnVertical" title="中央を縦に切り抜いて左右をくっつける">左右を結合（縦カット）</button>
+      <button id="btnCopy" class="primary" disabled>📋 クリップボードにコピー</button>
+      <button id="btnDownload" class="primary" disabled>💾 PNG保存</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="drop-zone" id="dropZone">
+      <p style="font-size: 1.1rem; color: #fff;">画像をここにドラッグ＆ドロップ</p>
+      <p>または <strong>Ctrl + V</strong>（スクショ貼り付け） / 上部の「画像を選択」</p>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <!-- 元画像＋カット範囲指定 -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>元画像（赤いラインをドラッグして調整）</span>
+          <span id="cutInfo"></span>
+        </div>
+        <div class="editor-container mode-horizontal" id="editorContainer">
+          <img id="sourceImg" alt="編集対象">
+          <div class="cut-overlay" id="cutOverlay"></div>
+          <div class="cut-line" id="lineStart"></div>
+          <div class="cut-line" id="lineEnd"></div>
+        </div>
+      </div>
+
+      <!-- 結合結果プレビュー -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>結合プレビュー</span>
+          <span id="resultSize"></span>
+        </div>
+        <canvas id="resultCanvas"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast">コピーしました！</div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const workspace = document.getElementById('workspace');
+    const editorContainer = document.getElementById('editorContainer');
+    const sourceImg = document.getElementById('sourceImg');
+    const cutOverlay = document.getElementById('cutOverlay');
+    const lineStart = document.getElementById('lineStart');
+    const lineEnd = document.getElementById('lineEnd');
+    const resultCanvas = document.getElementById('resultCanvas');
+    const ctx = resultCanvas.getContext('2d');
+
+    const btnHorizontal = document.getElementById('btnHorizontal');
+    const btnVertical = document.getElementById('btnVertical');
+    const btnCopy = document.getElementById('btnCopy');
+    const btnDownload = document.getElementById('btnDownload');
+    const cutInfo = document.getElementById('cutInfo');
+    const resultSize = document.getElementById('resultSize');
+    const toast = document.getElementById('toast');
+
+    let mode = 'horizontal'; // 'horizontal' (上下結合) or 'vertical' (左右結合)
+    let startRatio = 0.35;   // 0.0 ~ 1.0
+    let endRatio = 0.65;     // 0.0 ~ 1.0
+    let draggingLine = null; // 'start' or 'end'
+    let originalFileName = 'merged-image';
+
+    // トースト通知
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    // 画像読み込み処理
+    function loadImageFile(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      if (file.name) {
+        originalFileName = file.name.replace(/\.[^/.]+$/, "");
+      } else {
+        originalFileName = 'screenshot';
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        sourceImg.onload = () => {
+          dropZone.style.display = 'none';
+          workspace.style.display = 'flex';
+          btnCopy.disabled = false;
+          btnDownload.disabled = false;
+          startRatio = 0.35;
+          endRatio = 0.65;
+          updateUI();
+        };
+        sourceImg.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // ファイル選択
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) loadImageFile(e.target.files[0]);
+    });
+
+    // ドラッグ＆ドロップ
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    window.addEventListener('dragleave', () => {
+      dropZone.classList.remove('dragover');
+    });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        loadImageFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    // クリップボード貼り付け (Ctrl+V)
+    window.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          loadImageFile(item.getAsFile());
+          showToast('クリップボードから画像を読み込みました');
+          break;
+        }
+      }
+    });
+
+    // モード切替
+    btnHorizontal.addEventListener('click', () => {
+      mode = 'horizontal';
+      btnHorizontal.classList.add('active-mode');
+      btnVertical.classList.remove('active-mode');
+      editorContainer.className = 'editor-container mode-horizontal';
+      updateUI();
+    });
+
+    btnVertical.addEventListener('click', () => {
+      mode = 'vertical';
+      btnVertical.classList.add('active-mode');
+      btnHorizontal.classList.remove('active-mode');
+      editorContainer.className = 'editor-container mode-vertical';
+      updateUI();
+    });
+
+    // ラインのドラッグ操作（マウス＆タッチ両対応）
+    function startDrag(line, e) {
+      e.preventDefault();
+      draggingLine = line;
+    }
+
+    lineStart.addEventListener('mousedown', (e) => startDrag('start', e));
+    lineEnd.addEventListener('mousedown', (e) => startDrag('end', e));
+    lineStart.addEventListener('touchstart', (e) => startDrag('start', e), { passive: false });
+    lineEnd.addEventListener('touchstart', (e) => startDrag('end', e), { passive: false });
+
+    function onMove(e) {
+      if (!draggingLine) return;
+      const rect = sourceImg.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      let ratio;
+      if (mode === 'horizontal') {
+        ratio = (clientY - rect.top) / rect.height;
+      } else {
+        ratio = (clientX - rect.left) / rect.width;
+      }
+
+      ratio = Math.max(0, Math.min(1, ratio));
+
+      if (draggingLine === 'start') {
+        startRatio = Math.min(ratio, endRatio - 0.01);
+      } else {
+        endRatio = Math.max(ratio, startRatio + 0.01);
+      }
+      updateUI();
+    }
+
+    function endDrag() {
+      draggingLine = null;
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchend', endDrag);
+
+    // ウィンドウリサイズ時にもライン位置を再計算
+    window.addEventListener('resize', updateUI);
+
+    // オーバーレイとCanvas描画の更新
+    function updateUI() {
+      if (!sourceImg.naturalWidth) return;
+
+      const nw = sourceImg.naturalWidth;
+      const nh = sourceImg.naturalHeight;
+
+      if (mode === 'horizontal') {
+        // オーバーレイ・ライン位置設定
+        lineStart.style.top = (startRatio * 100) + '%';
+        lineStart.style.left = '0';
+        lineEnd.style.top = (endRatio * 100) + '%';
+        lineEnd.style.left = '0';
+
+        cutOverlay.style.top = (startRatio * 100) + '%';
+        cutOverlay.style.left = '0';
+        cutOverlay.style.width = '100%';
+        cutOverlay.style.height = ((endRatio - startRatio) * 100) + '%';
+
+        // 実ピクセル計算
+        const cutStart = Math.round(nh * startRatio);
+        const cutEnd = Math.round(nh * endRatio);
+        const topHeight = cutStart;
+        const bottomHeight = nh - cutEnd;
+        const newHeight = topHeight + bottomHeight;
+
+        resultCanvas.width = nw;
+        resultCanvas.height = Math.max(1, newHeight);
+        ctx.clearRect(0, 0, nw, newHeight);
+
+        if (topHeight > 0) {
+          ctx.drawImage(sourceImg, 0, 0, nw, topHeight, 0, 0, nw, topHeight);
+        }
+        if (bottomHeight > 0) {
+          ctx.drawImage(sourceImg, 0, cutEnd, nw, bottomHeight, 0, topHeight, nw, bottomHeight);
+        }
+
+        cutInfo.textContent = `削除高さ: ${cutEnd - cutStart}px`;
+        resultSize.textContent = `${nw} × ${newHeight}px`;
+
+      } else {
+        // 縦カット（左右結合）
+        lineStart.style.left = (startRatio * 100) + '%';
+        lineStart.style.top = '0';
+        lineEnd.style.left = (endRatio * 100) + '%';
+        lineEnd.style.top = '0';
+
+        cutOverlay.style.left = (startRatio * 100) + '%';
+        cutOverlay.style.top = '0';
+        cutOverlay.style.height = '100%';
+        cutOverlay.style.width = ((endRatio - startRatio) * 100) + '%';
+
+        const cutStart = Math.round(nw * startRatio);
+        const cutEnd = Math.round(nw * endRatio);
+        const leftWidth = cutStart;
+        const rightWidth = nw - cutEnd;
+        const newWidth = leftWidth + rightWidth;
+
+        resultCanvas.width = Math.max(1, newWidth);
+        resultCanvas.height = nh;
+        ctx.clearRect(0, 0, newWidth, nh);
+
+        if (leftWidth > 0) {
+          ctx.drawImage(sourceImg, 0, 0, leftWidth, nh, 0, 0, leftWidth, nh);
+        }
+        if (rightWidth > 0) {
+          ctx.drawImage(sourceImg, cutEnd, 0, rightWidth, nh, leftWidth, 0, rightWidth, nh);
+        }
+
+        cutInfo.textContent = `削除幅: ${cutEnd - cutStart}px`;
+        resultSize.textContent = `${newWidth} × ${nh}px`;
+      }
+    }
+
+    // クリップボードにコピー
+    btnCopy.addEventListener('click', () => {
+      resultCanvas.toBlob(async (blob) => {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          showToast('結合画像をクリップボードにコピーしました！');
+        } catch (err) {
+          alert('クリップボードへのコピーに失敗しました。ブラウザの権限設定を確認するか、「PNG保存」をご利用ください。');
+        }
+      }, 'image/png');
+    });
+
+    // PNGダウンロード
+    btnDownload.addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = `${originalFileName}_merged.png`;
+      link.href = resultCanvas.toDataURL('image/png');
+      link.click();
+    });
+  </script>
+</body>
+</html>
